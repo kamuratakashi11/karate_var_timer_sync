@@ -61,6 +61,16 @@ def _is_running():
     return _timer_state_source() == "running"
 
 
+def _is_host_request():
+    """
+    リクエストがPC自身(録画PC)のブラウザから来たものかどうか。
+    リプレイ/テイクのモード切替は、iPad等LAN経由の監査端末から誤って
+    操作されると録画中の事故に繋がりうるため、PC自身(127.0.0.1)からの
+    アクセスのみに制限する(記録員が物理的にそのPCの前にいる前提)。
+    """
+    return request.remote_addr in ("127.0.0.1", "::1")
+
+
 def register_timer_state_source(get_state_fn):
     """
     main.pyから TimerSyncedKeyListener.get_state を渡してもらい、
@@ -176,6 +186,11 @@ def api_mode_get():
 
 @app.route("/api/mode", methods=["POST"])
 def api_mode_post():
+    if not _is_host_request():
+        return jsonify({
+            "ok": False,
+            "error": "モード切替は録画PC自身のブラウザからのみ操作できます",
+        }), 403
     body = request.get_json(silent=True) or {}
     mode = body.get("mode")
     if mode not in (recording_mode.REPLAY, recording_mode.TAKE):
@@ -217,6 +232,7 @@ def api_status():
     else:
         result["timer_sync_state"] = None
     result["mode"] = recording_mode.get_mode()
+    result["is_host"] = _is_host_request()  # モード切替ボタンをこの端末で表示してよいか
     return jsonify(result)
 
 
