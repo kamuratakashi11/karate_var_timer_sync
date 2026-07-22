@@ -1,0 +1,7 @@
+# 録画データ・監査ログ(個人の映像データを含むため、GitHubには一切上げない)
+data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

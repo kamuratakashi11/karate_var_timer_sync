@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>空手 BAR 監査画面</title>
+<style>
+  * { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+  body {
+    margin: 0; padding: 0; background: #111; color: #eee;
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+    overflow-y: auto; /* 全項目が画面に収まりきらない場合はページ全体をスクロール可能にする */
+  }
+  /* iOS Safariは横向き回転時、住所バー等のブラウザUIの分だけ実際に見える
+     範囲が100vhより小さくなることがあり、それを考慮せずレイアウトすると
+     上部のタブ等が画面外にはみ出して見えなくなる。100dvh(対応ブラウザのみ)
+     に上書きすることで、実際に見えている範囲を基準にレイアウトさせる。 */
+  @supports (height: 100dvh) {
+    body { height: 100dvh; }
+  }
+  /* ヘッダー系の各バーは、縦幅が足りない時にflexboxで押しつぶされて
+     文字が見切れることがないよう、常に自然な高さを保つ(縮まない)ようにする。
+     画面が足りない分は#video-area(動画エリア)側だけが縮む。 */
+  #warning-bar {
+    background: #c0392b; color: #fff; text-align: center;
+    padding: 10px; font-weight: bold; display: none;
+    flex-shrink: 0;
+  }
+  #warning-bar.show { display: block; }
+
+  #sync-bar {
+    text-align: center; padding: 8px; font-size: 14px; font-weight: bold;
+    display: none;
+    flex-shrink: 0;
+  }
+  #sync-bar.running { display: block; background: #7a1f1f; color: #fff; }
+  #sync-bar.stopped { display: block; background: #1f5c2e; color: #fff; }
+
+  #tab-bar {
+    display: flex; flex-shrink: 0; background: #1c1c1c; border-bottom: 1px solid #333;
+  }
+  .tab-btn {
+    flex: 1; padding: 12px; font-size: 15px; font-weight: bold;
+    background: #1c1c1c; color: #888; border: none; border-bottom: 3px solid transparent;
+  }
+  .tab-btn.active { color: #eee; border-bottom-color: #2a6fdb; }
+
+  /* タブで切り替える2つのビュー。非アクティブな方はdisplay:noneで場所を取らない。
+     アクティブな方だけflex:1で残りの縦幅いっぱいに広がる(#video-viewが動画を
+     大きく表示できるようにするための対応)。 */
+  #list-view, #video-view { display: none; }
+  #list-view.active { display: block; flex: 1; min-height: 0; overflow-y: auto; }
+  #video-view.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+  #mode-bar { padding: 8px 10px 0; background: #1c1c1c; flex-shrink: 0; }
+  #btn-mode-toggle {
+    width: 100%; padding: 12px; font-size: 15px; font-weight: bold;
+    border-radius: 8px; border: 2px solid #444; background: #2a2a2a; color: #eee;
+  }
+  #btn-mode-toggle.take { background: #5a3a1f; border-color: #d98a3a; color: #fff; }
+  #btn-mode-toggle:disabled { opacity: 0.5; }
+
+  #slot-bar {
+    display: flex; gap: 8px; padding: 10px; background: #1c1c1c;
+    overflow-x: auto; flex-shrink: 0;
+  }
+  .slot-btn {
+    flex: 0 0 auto; padding: 10px 20px; background: #333; color: #eee;
+    border: 2px solid #444; border-radius: 8px; font-size: 16px;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  }
+  .slot-btn.active { background: #2a6fdb; border-color: #4a8fff; }
+
+  /* リプレイ/テイクどちらが元になっているクリップかを一目で分かるようにする小さいタグ */
+  .mode-tag {
+    font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 10px;
+    line-height: 1.6;
+  }
+  .mode-tag-replay { background: #1f3a5c; color: #8fc2ff; }
+  .mode-tag-take { background: #5a3a1f; color: #ffbf7f; }
+
+  .list-toggle-row {
+    display: flex; gap: 8px; padding: 0 10px 10px; background: #1c1c1c;
+    align-items: center; flex-shrink: 0;
+  }
+  .list-toggle-row button {
+    background: #2a2a2a; color: #ccc; border: 1px solid #444;
+    border-radius: 6px; padding: 8px 14px; font-size: 14px;
+  }
+  .edit-btn.active { background: #5a2a2a; border-color: #a33; color: #fff; }
+  .list-bar {
+    display: none; flex-wrap: wrap; gap: 8px; padding: 0 10px 10px; background: #1c1c1c;
+    flex-shrink: 0;
+  }
+  .list-bar.show { display: flex; }
+  .list-btn {
+    flex: 0 0 auto; padding: 8px 16px; background: #2a3a2a; color: #eee;
+    border: 2px solid #3a5a3a; border-radius: 8px; font-size: 14px;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  }
+  .list-btn.active { background: #1f7a3a; border-color: #2fae55; }
+  .edit-row {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #232323; border-radius: 6px; font-size: 14px; width: 100%;
+  }
+  .edit-row input { width: 20px; height: 20px; }
+  .list-empty { color: #666; font-size: 13px; padding: 4px 4px; }
+  .list-delete-row {
+    display: none; padding: 0 10px 10px; background: #1c1c1c;
+    flex-shrink: 0;
+  }
+  .list-delete-row.show { display: block; }
+  .list-delete-row button {
+    background: #7a1f1f; color: #fff; border: 1px solid #a33; border-radius: 6px;
+    padding: 10px 16px; font-size: 14px; width: 100%;
+  }
+  .list-delete-row button:disabled { opacity: 0.5; }
+
+  #video-area {
+    flex: 1; min-height: 80px; display: flex; align-items: center; justify-content: center;
+    position: relative; background: #000; touch-action: none;
+  }
+  #player { max-width: 100%; max-height: 100%; }
+  #placeholder { color: #666; font-size: 20px; }
+
+  #controls {
+    background: #1c1c1c; padding: 14px; display: flex;
+    align-items: center; justify-content: center; gap: 20px;
+    flex-shrink: 0;
+  }
+  .ctrl-btn {
+    background: #2a2a2a; color: #eee; border: 1px solid #444;
+    border-radius: 50%; width: 56px; height: 56px; font-size: 22px;
+  }
+  #btn-save {
+    background: #1f5c2e; color: #fff; border: 1px solid #2fae55;
+    border-radius: 8px; padding: 0 18px; height: 56px; font-size: 15px;
+    display: none;
+  }
+  #btn-save.show { display: inline-block; }
+  #btn-save:disabled { opacity: 0.6; }
+  #frame-info {
+    font-size: 15px; color: #aaa; min-width: 160px; text-align: center;
+    flex-shrink: 0;
+  }
+  #swipe-hint {
+    text-align: center; color: #555; font-size: 13px; padding: 6px;
+    background: #1c1c1c; flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+  <div id="warning-bar"></div>
+  <div id="sync-bar"></div>
+
+  <div id="tab-bar">
+    <button id="tab-btn-video" class="tab-btn">🎬 再生</button>
+    <button id="tab-btn-list" class="tab-btn">📋 一覧・設定</button>
+  </div>
+
+  <div id="list-view">
+    <div id="mode-bar">
+      <button id="btn-mode-toggle">モード: リプレイ</button>
+    </div>
+
+    <div id="slot-bar"></div>
+
+    <div class="list-toggle-row">
+      <button id="btn-toggle-saved">保存済み一覧を表示 (0件)</button>
+      <button id="btn-edit-saved" class="edit-btn">編集</button>
+    </div>
+    <div id="saved-bar" class="list-bar"></div>
+    <div id="saved-delete-row" class="list-delete-row">
+      <button id="btn-delete-saved">選択した保存済みクリップを削除</button>
+    </div>
+
+    <div class="list-toggle-row">
+      <button id="btn-toggle-takes">テイク一覧を表示 (0件)</button>
+      <button id="btn-edit-takes" class="edit-btn">編集</button>
+    </div>
+    <div id="takes-bar" class="list-bar"></div>
+    <div id="takes-delete-row" class="list-delete-row">
+      <button id="btn-delete-takes">選択したテイクを削除</button>
+    </div>
+  </div>
+
+  <div id="video-view">
+    <div id="video-area">
+      <div id="placeholder">クリップを選択してください</div>
+      <video id="player" playsinline></video>
+    </div>
+
+    <div id="swipe-hint">動画エリアを左右にスワイプ → コマ送り</div>
+
+    <div id="controls">
+      <button class="ctrl-btn" id="btn-prev">⏮</button>
+      <button class="ctrl-btn" id="btn-play">▶</button>
+      <button class="ctrl-btn" id="btn-next">⏭</button>
+      <button id="btn-save">★ このクリップを保存</button>
+    </div>
+    <div id="frame-info">-- / --</div>
+  </div>
+
+<script>
+const FPS = 60;
+const FRAME_DUR = 1 / FPS;
+const PIXELS_PER_FRAME = 12; // この距離スワイプしたら1フレーム進む/戻る
+
+const player = document.getElementById('player');
+const placeholder = document.getElementById('placeholder');
+const slotBar = document.getElementById('slot-bar');
+const warningBar = document.getElementById('warning-bar');
+const frameInfo = document.getElementById('frame-info');
+const btnPlay = document.getElementById('btn-play');
+const videoArea = document.getElementById('video-area');
+const btnSave = document.getElementById('btn-save');
+const btnModeToggle = document.getElementById('btn-mode-toggle');
+const tabBtnVideo = document.getElementById('tab-btn-video');
+const tabBtnList = document.getElementById('tab-btn-list');
+const listView = document.getElementById('list-view');
+const videoView = document.getElementById('video-view');
+
+function setTab(tab) {
+  const showVideo = tab === 'video';
+  videoView.classList.toggle('active', showVideo);
+  listView.classList.toggle('active', !showVideo);
+  tabBtnVideo.classList.toggle('active', showVideo);
+  tabBtnList.classList.toggle('active', !showVideo);
+}
+
+tabBtnVideo.onclick = () => setTab('video');
+tabBtnList.onclick = () => setTab('list');
+setTab('list'); // 起動直後はまだ再生するクリップが無いので一覧タブから始める
+
+let currentClips = [];
+let isPlaying = false;
+let currentFilename = null;   // 現在プレイヤーに読み込んでいるファイル名
+let currentSrcPrefix = null;  // '/clips/' '/saved/' '/takes/' のいずれか
+let currentMode = 'replay';   // サーバー側の現在の録画モード('replay'/'take')
+let isRunning = false;        // タイマーが動作中かどうか(モード切替可否に使う)
+
+function updateFrameInfo() {
+  const frame = Math.round(player.currentTime / FRAME_DUR);
+  const totalFrames = Math.round((player.duration || 0) / FRAME_DUR);
+  frameInfo.textContent = `frame ${frame} / ${totalFrames}`;
+}
+
+function loadClip(filename, btn, srcPrefix) {
+  document.querySelectorAll('.slot-btn, .list-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  placeholder.style.display = 'none';
+  player.src = srcPrefix + filename;
+  player.style.display = 'block';
+  player.pause();
+  isPlaying = false;
+  btnPlay.textContent = '▶';
+  player.addEventListener('loadedmetadata', updateFrameInfo, { once: true });
+
+  currentFilename = filename;
+  currentSrcPrefix = srcPrefix;
+  // 「保存」ボタンは、まだ永久保存していない現在のリプレイクリップ(/clips/)を
+  // 見ているときだけ表示する(保存済み・テイクは対象外)
+  btnSave.classList.toggle('show', srcPrefix === '/clips/');
+  btnSave.disabled = false;
+  btnSave.textContent = '★ このクリップを保存';
+
+  setTab('video'); // クリップを選ぶと自動的に再生タブへ切り替え、大きく表示する
+}
+
+function makeModeTag(mode) {
+  const tag = document.createElement('span');
+  tag.className = mode === 'take' ? 'mode-tag mode-tag-take' : 'mode-tag mode-tag-replay';
+  tag.textContent = mode === 'take' ? 'テイク' : 'リプレイ';
+  return tag;
+}
+
+async function refreshClips() {
+  try {
+    const res = await fetch('/api/clips');
+    const clips = await res.json();
+    currentClips = clips;
+    slotBar.innerHTML = '';
+    clips.forEach((c, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'slot-btn';
+      btn.appendChild(makeModeTag('replay'));
+      const label = document.createElement('span');
+      label.textContent = (i === 0 ? '最新: ' : '') + c.label;
+      btn.appendChild(label);
+      btn.onclick = () => loadClip(c.filename, btn, '/clips/');
+      slotBar.appendChild(btn);
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+btnSave.onclick = async () => {
+  if (!currentFilename || currentSrcPrefix !== '/clips/') return;
+  btnSave.disabled = true;
+  btnSave.textContent = '保存中...';
+  try {
+    const res = await fetch(`/api/clips/${encodeURIComponent(currentFilename)}/save`, { method: 'POST' });
+    const result = await res.json();
+    if (res.ok && result.ok) {
+      btnSave.textContent = '✓ 保存しました';
+      await savedList.refresh();
+    } else {
+      btnSave.textContent = '✗ 保存失敗';
+      btnSave.disabled = false;
+      console.error(result.error || 'save failed');
+    }
+  } catch (e) {
+    btnSave.textContent = '✗ 保存失敗';
+    btnSave.disabled = false;
+    console.error(e);
+  }
+};
+
+// --- 保存済み一覧・テイク一覧の表示/編集/一括削除(共通ロジック) ---
+function makeManagedList(opts) {
+  const { listUrl, deleteUrl, srcPrefix, toggleBtn, editBtn, barEl, deleteRow, deleteBtn, emptyText, formatLabel, originMode } = opts;
+  let items = [];
+  let visible = false;
+  let editing = false;
+  let selected = new Set();
+
+  function updateToggleLabel() {
+    toggleBtn.textContent = (visible ? '一覧を隠す' : '一覧を表示') + ` (${items.length}件)`;
+  }
+
+  function render() {
+    barEl.innerHTML = '';
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'list-empty';
+      empty.textContent = emptyText;
+      barEl.appendChild(empty);
+      deleteRow.classList.remove('show');
+      return;
+    }
+    items.forEach((item) => {
+      const key = item.filename;
+      if (editing) {
+        const row = document.createElement('label');
+        row.className = 'edit-row';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selected.has(key);
+        cb.onchange = () => {
+          if (cb.checked) selected.add(key); else selected.delete(key);
+          deleteBtn.disabled = selected.size === 0;
+        };
+        row.appendChild(cb);
+        row.appendChild(makeModeTag(originMode));
+        const span = document.createElement('span');
+        span.textContent = formatLabel(item);
+        row.appendChild(span);
+        barEl.appendChild(row);
+      } else {
+        const btn = document.createElement('button');
+        btn.className = 'list-btn';
+        if (key === currentFilename && currentSrcPrefix === srcPrefix) btn.classList.add('active');
+        btn.appendChild(makeModeTag(originMode));
+        const label = document.createElement('span');
+        label.textContent = formatLabel(item);
+        btn.appendChild(label);
+        btn.onclick = () => loadClip(key, btn, srcPrefix);
+        barEl.appendChild(btn);
+      }
+    });
+    deleteRow.classList.toggle('show', editing);
+    if (editing) deleteBtn.disabled = selected.size === 0;
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch(listUrl);
+      items = await res.json();
+      // 一覧から消えたアイテムの選択状態は残さない
+      selected = new Set([...selected].filter(k => items.some(i => i.filename === k)));
+      updateToggleLabel();
+      if (visible) render();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  toggleBtn.onclick = () => {
+    visible = !visible;
+    barEl.classList.toggle('show', visible);
+    if (!visible) {
+      editing = false;
+      editBtn.classList.remove('active');
+      deleteRow.classList.remove('show');
+    }
+    updateToggleLabel();
+    if (visible) render();
+  };
+
+  editBtn.onclick = () => {
+    if (!visible) return;
+    editing = !editing;
+    editBtn.classList.toggle('active', editing);
+    if (!editing) selected.clear();
+    render();
+  };
+
+  deleteBtn.onclick = async () => {
+    if (selected.size === 0) return;
+    const filenames = [...selected];
+    if (!confirm(`選択した${filenames.length}件を完全に削除します。よろしいですか？`)) return;
+    deleteBtn.disabled = true;
+    try {
+      const res = await fetch(deleteUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filenames }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.ok) {
+        console.error(result.error || 'delete failed');
+      }
+      if (filenames.includes(currentFilename) && currentSrcPrefix === srcPrefix) {
+        currentFilename = null;
+        currentSrcPrefix = null;
+        player.removeAttribute('src');
+        player.style.display = 'none';
+        placeholder.style.display = 'block';
+        btnSave.classList.remove('show');
+      }
+      selected.clear();
+      editing = false;
+      editBtn.classList.remove('active');
+      await refresh();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return { refresh };
+}
+
+const savedList = makeManagedList({
+  listUrl: '/api/saved',
+  deleteUrl: '/api/saved/delete',
+  srcPrefix: '/saved/',
+  toggleBtn: document.getElementById('btn-toggle-saved'),
+  editBtn: document.getElementById('btn-edit-saved'),
+  barEl: document.getElementById('saved-bar'),
+  deleteRow: document.getElementById('saved-delete-row'),
+  deleteBtn: document.getElementById('btn-delete-saved'),
+  emptyText: 'まだ保存済みクリップはありません',
+  formatLabel: (s) => `${s.saved_at} (${s.court})`,
+  originMode: 'replay', // 保存済みクリップは現状すべてリプレイモードのクリップが元になっている
+});
+
+const takesList = makeManagedList({
+  listUrl: '/api/takes',
+  deleteUrl: '/api/takes/delete',
+  srcPrefix: '/takes/',
+  toggleBtn: document.getElementById('btn-toggle-takes'),
+  editBtn: document.getElementById('btn-edit-takes'),
+  barEl: document.getElementById('takes-bar'),
+  deleteRow: document.getElementById('takes-delete-row'),
+  deleteBtn: document.getElementById('btn-delete-takes'),
+  emptyText: 'まだテイクはありません',
+  formatLabel: (t) => `${t.taken_at} (${t.court}, ${Math.round(t.duration_sec)}秒)`,
+  originMode: 'take',
+});
+
+// --- モード切り替え(単一トグルボタン。タップごとにreplay⇄takeが切り替わる) ---
+function updateModeButton() {
+  btnModeToggle.textContent = 'モード: ' + (currentMode === 'take' ? 'テイク' : 'リプレイ');
+  btnModeToggle.classList.toggle('take', currentMode === 'take');
+  btnModeToggle.disabled = isRunning;
+}
+
+btnModeToggle.onclick = async () => {
+  if (isRunning) return;
+  const nextMode = currentMode === 'take' ? 'replay' : 'take';
+  btnModeToggle.disabled = true;
+  try {
+    const res = await fetch('/api/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: nextMode }),
+    });
+    const result = await res.json();
+    if (res.ok && result.ok) {
+      currentMode = result.mode;
+    } else {
+      console.error(result.error || 'mode switch failed');
+    }
+  } catch (e) {
+    console.error(e);
+  }
+  updateModeButton();
+};
+
+async function refreshStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const status = await res.json();
+    if (!status.recording_ok) {
+      warningBar.textContent = '⚠ ' + status.message;
+      warningBar.classList.add('show');
+    } else {
+      warningBar.classList.remove('show');
+    }
+
+    const syncBar = document.getElementById('sync-bar');
+    isRunning = status.timer_sync_state === 'running';
+    if (status.timer_sync_state === 'running') {
+      const modeLabel = status.mode === 'take' ? 'テイク録画中' : '録画中';
+      syncBar.textContent = `🔴 ${modeLabel}(実際のタイマー表示と一致しているか確認してください)`;
+      syncBar.className = 'running';
+    } else if (status.timer_sync_state === 'stopped') {
+      syncBar.textContent = '🟢 スタンバイ';
+      syncBar.className = 'stopped';
+    } else {
+      syncBar.className = '';
+    }
+
+    if (status.mode) {
+      currentMode = status.mode;
+    }
+    updateModeButton();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// --- 再生/一時停止 ---
+btnPlay.onclick = () => {
+  if (isPlaying) {
+    player.pause();
+    btnPlay.textContent = '▶';
+  } else {
+    player.play();
+    btnPlay.textContent = '⏸';
+  }
+  isPlaying = !isPlaying;
+};
+
+document.getElementById('btn-prev').onclick = () => stepFrame(-1);
+document.getElementById('btn-next').onclick = () => stepFrame(1);
+
+function stepFrame(n) {
+  player.pause();
+  isPlaying = false;
+  btnPlay.textContent = '▶';
+  let t = player.currentTime + n * FRAME_DUR;
+  t = Math.max(0, Math.min(player.duration || 0, t));
+  player.currentTime = t;
+}
+
+player.addEventListener('timeupdate', updateFrameInfo);
+
+// --- スワイプでコマ送り ---
+let touchStartX = null;
+let accumulatedPixels = 0;
+
+videoArea.addEventListener('touchstart', (e) => {
+  if (!player.src) return;
+  player.pause();
+  isPlaying = false;
+  btnPlay.textContent = '▶';
+  touchStartX = e.touches[0].clientX;
+  accumulatedPixels = 0;
+}, { passive: true });
+
+videoArea.addEventListener('touchmove', (e) => {
+  if (touchStartX === null) return;
+  const x = e.touches[0].clientX;
+  const delta = x - touchStartX;
+  touchStartX = x;
+  accumulatedPixels += delta;
+
+  while (Math.abs(accumulatedPixels) >= PIXELS_PER_FRAME) {
+    const dir = accumulatedPixels > 0 ? 1 : -1;
+    stepFrame(dir);
+    accumulatedPixels -= dir * PIXELS_PER_FRAME;
+  }
+}, { passive: true });
+
+videoArea.addEventListener('touchend', () => {
+  touchStartX = null;
+  accumulatedPixels = 0;
+});
+
+// マウスでも動作確認できるように(PCブラウザでのテスト用)
+let mouseDown = false;
+videoArea.addEventListener('mousedown', (e) => {
+  if (!player.src) return;
+  mouseDown = true;
+  touchStartX = e.clientX;
+  accumulatedPixels = 0;
+  player.pause();
+  isPlaying = false;
+});
+videoArea.addEventListener('mousemove', (e) => {
+  if (!mouseDown || touchStartX === null) return;
+  const delta = e.clientX - touchStartX;
+  touchStartX = e.clientX;
+  accumulatedPixels += delta;
+  while (Math.abs(accumulatedPixels) >= PIXELS_PER_FRAME) {
+    const dir = accumulatedPixels > 0 ? 1 : -1;
+    stepFrame(dir);
+    accumulatedPixels -= dir * PIXELS_PER_FRAME;
+  }
+});
+window.addEventListener('mouseup', () => { mouseDown = false; });
+
+refreshClips();
+refreshStatus();
+savedList.refresh();
+takesList.refresh();
+setInterval(refreshClips, 3000);
+setInterval(refreshStatus, 2000);
+setInterval(savedList.refresh, 5000);
+setInterval(takesList.refresh, 5000);
+</script>
+</body>
+</html>
