@@ -181,7 +181,11 @@ class ClipExtractor:
                 candidates = segments[:-1] if exclude_anchor else segments
 
             # 直近何秒分をカバーするのに必要な個数か(安全マージンとして+2)。
-            needed = int(CLIP_DURATION_SECONDS // SEGMENT_SECONDS) + 2
+            # exclude_anchor時は最新セグメント1本を失う上に、残りのセグメント
+            # 数・音声データ量が少なくなりすぎると音声コーデックパラメータの
+            # 判定に失敗しやすくなるため、安全マージンを+3にして補う。
+            margin = 3 if exclude_anchor else 2
+            needed = int(CLIP_DURATION_SECONDS // SEGMENT_SECONDS) + margin
             recent = candidates[-needed:]
 
             if not recent:

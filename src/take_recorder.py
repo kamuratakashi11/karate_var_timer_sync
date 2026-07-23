@@ -154,7 +154,12 @@ class TakeRecorder:
             # 経過時間をカバーするのに必要な個数(安全マージンとして+2)。
             # cleanup_loopはstart_take()時点からpause_cleanup()で止まっている前提なので、
             # 区間全体のセグメントがまだ残っているはず。
-            needed = int(elapsed // SEGMENT_SECONDS) + 2
+            # exclude_anchor時は最新セグメント1本を失う上に、短いテイクだと
+            # 残りのセグメント数・音声データ量が少なくなりすぎて音声コーデック
+            # パラメータの判定に失敗しやすくなるため、安全マージンを+3にして
+            # 実質的な取りこぼしを補う。
+            margin = 3 if exclude_anchor else 2
+            needed = int(elapsed // SEGMENT_SECONDS) + margin
             recent = candidates[-needed:]
 
             if not recent:
