@@ -168,6 +168,9 @@ class SegmentRingBufferRecorder:
 
     def _capture_loop(self):
         fail_count = 0
+        last_frame = None
+        frames_written = 0
+        capture_start = None
         while self._running:
             ok, frame = self.source.read()
             if not ok or frame is None:
@@ -178,14 +181,31 @@ class SegmentRingBufferRecorder:
                 continue
             fail_count = 0
             self._last_frame_time = time.time()
-            self._frame_count += 1
-            try:
-                self._ffmpeg_proc.stdin.write(frame.tobytes())
-            except (BrokenPipeError, ValueError):
-                if self.on_warning:
-                    self.on_warning("録画プロセスが停止しました。再起動してください。")
-                self._running = False
-                break
+            last_frame = frame
+
+            if capture_start is None:
+                capture_start = self._last_frame_time
+
+            # 実際のカメラ配信レートが設定FPSに届かないことがある(実機で
+            # 確認済み。ラウンド1参照)。ffmpeg側に生フレームを流し込む際、
+            # 実際に届いた分だけをそのまま書き込むと、実経過時間に対して
+            # フレーム数が不足し、出力映像の再生時間が実際より短くなって
+            # しまう(=早送りのように見える・タイマーとズレる不具合の原因)。
+            # 実経過時間から「本来この時点までに書き込まれているべき
+            # フレーム数」を計算し、届くまで直前のフレームを複製して書き込む
+            # ことで、常に実時間どおりのフレーム数を録画に反映する
+            # (CFR変換の標準的な手法)。
+            target_frames = int((self._last_frame_time - capture_start) * FPS) + 1
+            while frames_written < target_frames and self._running:
+                try:
+                    self._ffmpeg_proc.stdin.write(last_frame.tobytes())
+                except (BrokenPipeError, ValueError):
+                    if self.on_warning:
+                        self.on_warning("録画プロセスが停止しました。再起動してください。")
+                    self._running = False
+                    break
+                frames_written += 1
+                self._frame_count += 1
 
     def _cleanup_loop(self):
         """BUFFER_SEGMENTS個を超えた古いセグメントファイルを削除し続ける"""
