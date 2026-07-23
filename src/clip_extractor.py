@@ -53,6 +53,19 @@ import audit_log
 _clip_id_counter = itertools.count()
 
 
+def _run_ffmpeg(cmd):
+    """
+    ffmpegを実行し、失敗時はstderrの内容を含めて例外を出す。
+    従来はstderr=subprocess.DEVNULLで握りつぶしていたため、失敗時に
+    「exit status N」としか分からず原因調査ができなかった。
+    """
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg失敗(exit {result.returncode}): {result.stderr.strip()[-2000:]}"
+        )
+
+
 class ClipExtractor:
     def __init__(self, running_counter_fn=None):
         """
@@ -184,10 +197,9 @@ class ClipExtractor:
             # 宣言されてしまうことがある(録画側の癖で原因未特定)ため、
             # 暗黙の"-map 0"に頼らず映像・音声とも明示的に先頭ストリームを
             # 指定する(音声が無い構成でも失敗しないよう"?"で任意指定)。
-            subprocess.run(
+            _run_ffmpeg(
                 ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
-                 "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path],
-                check=True, stderr=subprocess.DEVNULL,
+                 "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path]
             )
             # ここから先はcombined_pathという独立したファイルだけを使うので、
             # 元のセグメントファイル群には依存しない。ロックはここで解放してよい。
@@ -198,12 +210,11 @@ class ClipExtractor:
         duration = self._probe_duration(combined_path)
         start = max(0.0, duration - CLIP_DURATION_SECONDS)
 
-        subprocess.run(
+        _run_ffmpeg(
             ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", combined_path,
              "-t", f"{CLIP_DURATION_SECONDS:.3f}",
              "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
-             "-movflags", "+faststart", final_path],
-            check=True, stderr=subprocess.DEVNULL,
+             "-movflags", "+faststart", final_path]
         )
 
         os.remove(concat_path)

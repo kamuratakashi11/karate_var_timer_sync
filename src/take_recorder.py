@@ -36,6 +36,19 @@ _take_id_counter = itertools.count()
 _index_lock = threading.Lock()
 
 
+def _run_ffmpeg(cmd):
+    """
+    ffmpegを実行し、失敗時はstderrの内容を含めて例外を出す。
+    従来はstderr=subprocess.DEVNULLで握りつぶしていたため、失敗時に
+    「exit status N」としか分からず原因調査ができなかった。
+    """
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg失敗(exit {result.returncode}): {result.stderr.strip()[-2000:]}"
+        )
+
+
 def _ascii_court_slug(text):
     """saved_clips.py と同じ考え方: ファイル名(=URLパスの一部)には
     日本語を含みうるCOURT_NAMEをそのまま使わず、ASCII専用のハッシュにする。
@@ -157,21 +170,19 @@ class TakeRecorder:
             # この不整合でストリーム選択が混乱し、音声が丸ごと欠落することが
             # あったため、映像・音声とも明示的に先頭ストリームを指定する
             # (音声が無い構成でも失敗しないよう"?"で任意指定にする)。
-            subprocess.run(
+            _run_ffmpeg(
                 ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
-                 "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path],
-                check=True, stderr=subprocess.DEVNULL,
+                 "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path]
             )
 
         duration = self._probe_duration(combined_path)
         start = max(0.0, duration - elapsed)
 
-        subprocess.run(
+        _run_ffmpeg(
             ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", combined_path,
              "-t", f"{elapsed:.3f}",
              "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
-             "-movflags", "+faststart", final_path],
-            check=True, stderr=subprocess.DEVNULL,
+             "-movflags", "+faststart", final_path]
         )
 
         os.remove(concat_path)
