@@ -180,9 +180,13 @@ class ClipExtractor:
                     f.write(f"file '{os.path.abspath(seg)}'\n")
 
             # 再エンコードなしで結合(高速・劣化なし)。
+            # 音声有効時、セグメントによっては映像・音声が内部的に2組
+            # 宣言されてしまうことがある(録画側の癖で原因未特定)ため、
+            # 暗黙の"-map 0"に頼らず映像・音声とも明示的に先頭ストリームを
+            # 指定する(音声が無い構成でも失敗しないよう"?"で任意指定)。
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
-                 "-c", "copy", combined_path],
+                 "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path],
                 check=True, stderr=subprocess.DEVNULL,
             )
             # ここから先はcombined_pathという独立したファイルだけを使うので、
@@ -196,7 +200,8 @@ class ClipExtractor:
 
         subprocess.run(
             ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", combined_path,
-             "-t", f"{CLIP_DURATION_SECONDS:.3f}", "-c", "copy",
+             "-t", f"{CLIP_DURATION_SECONDS:.3f}",
+             "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
              "-movflags", "+faststart", final_path],
             check=True, stderr=subprocess.DEVNULL,
         )

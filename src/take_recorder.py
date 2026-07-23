@@ -151,9 +151,15 @@ class TakeRecorder:
                 for seg in recent:
                     f.write(f"file '{os.path.abspath(seg)}'\n")
 
+            # 音声有効時、セグメントによっては映像・音声が内部的に2組
+            # 宣言されてしまうことがある(録画側の癖で原因未特定)。
+            # 素の"-c copy"(暗黙の-map 0)だと、多数のセグメントを結合した際に
+            # この不整合でストリーム選択が混乱し、音声が丸ごと欠落することが
+            # あったため、映像・音声とも明示的に先頭ストリームを指定する
+            # (音声が無い構成でも失敗しないよう"?"で任意指定にする)。
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
-                 "-c", "copy", combined_path],
+                 "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path],
                 check=True, stderr=subprocess.DEVNULL,
             )
 
@@ -162,7 +168,8 @@ class TakeRecorder:
 
         subprocess.run(
             ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", combined_path,
-             "-t", f"{elapsed:.3f}", "-c", "copy",
+             "-t", f"{elapsed:.3f}",
+             "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
              "-movflags", "+faststart", final_path],
             check=True, stderr=subprocess.DEVNULL,
         )
