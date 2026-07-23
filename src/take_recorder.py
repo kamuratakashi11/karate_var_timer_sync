@@ -188,8 +188,12 @@ class TakeRecorder:
         duration = self._probe_duration(combined_path)
         start = max(0.0, duration - elapsed)
 
+        # 結合ステップと同じ理由(音声コーデックパラメータの判定不足)で
+        # このトリム側の読み込みでも失敗することが実機で確認されたため、
+        # 同様にprobesize/analyzedurationを増やす。
         _run_ffmpeg(
-            ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", combined_path,
+            ["ffmpeg", "-y", "-probesize", "50M", "-analyzeduration", "100M",
+             "-ss", f"{start:.3f}", "-i", combined_path,
              "-t", f"{elapsed:.3f}",
              "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
              "-movflags", "+faststart", final_path]

@@ -219,8 +219,12 @@ class ClipExtractor:
         duration = self._probe_duration(combined_path)
         start = max(0.0, duration - CLIP_DURATION_SECONDS)
 
+        # 結合ステップと同じ理由(音声コーデックパラメータの判定不足)で
+        # このトリム側の読み込みでも失敗することがあるため、同様に
+        # probesize/analyzedurationを増やす。
         _run_ffmpeg(
-            ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", combined_path,
+            ["ffmpeg", "-y", "-probesize", "50M", "-analyzeduration", "100M",
+             "-ss", f"{start:.3f}", "-i", combined_path,
              "-t", f"{CLIP_DURATION_SECONDS:.3f}",
              "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
              "-movflags", "+faststart", final_path]
