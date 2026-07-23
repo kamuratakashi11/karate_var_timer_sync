@@ -170,8 +170,13 @@ class TakeRecorder:
             # この不整合でストリーム選択が混乱し、音声が丸ごと欠落することが
             # あったため、映像・音声とも明示的に先頭ストリームを指定する
             # (音声が無い構成でも失敗しないよう"?"で任意指定にする)。
+            # 音声(AAC)のコーデックパラメータ判定に必要な事前読み込み量が
+            # 既定値だと足りず、"Could not find codec parameters
+            # (unspecified sample rate)"で失敗することがあったため、
+            # probesize/analyzedurationを増やして確実に判定させる。
             _run_ffmpeg(
-                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
+                ["ffmpeg", "-y", "-probesize", "50M", "-analyzeduration", "100M",
+                 "-f", "concat", "-safe", "0", "-i", concat_path,
                  "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path]
             )
 

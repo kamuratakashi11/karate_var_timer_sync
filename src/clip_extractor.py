@@ -197,8 +197,13 @@ class ClipExtractor:
             # 宣言されてしまうことがある(録画側の癖で原因未特定)ため、
             # 暗黙の"-map 0"に頼らず映像・音声とも明示的に先頭ストリームを
             # 指定する(音声が無い構成でも失敗しないよう"?"で任意指定)。
+            # 音声(AAC)のコーデックパラメータ判定に必要な事前読み込み量が
+            # 既定値だと足りず、"Could not find codec parameters
+            # (unspecified sample rate)"で失敗することがあったため、
+            # probesize/analyzedurationを増やして確実に判定させる。
             _run_ffmpeg(
-                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
+                ["ffmpeg", "-y", "-probesize", "50M", "-analyzeduration", "100M",
+                 "-f", "concat", "-safe", "0", "-i", concat_path,
                  "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", combined_path]
             )
             # ここから先はcombined_pathという独立したファイルだけを使うので、
